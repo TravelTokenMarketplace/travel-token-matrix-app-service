@@ -3,7 +3,7 @@
 ###
 FROM golang:1.25.10-alpine AS builder
 RUN apk update && apk upgrade && apk add build-base
-WORKDIR /camino-matrix-app-service
+WORKDIR /travel-token-matrix-app-service
 
 COPY . .
 RUN go build -o build/
@@ -15,7 +15,7 @@ FROM alpine:3.21
 
 RUN apk add libc6-compat
 
-WORKDIR /camino-matrix-app-service
-COPY --from=builder /camino-matrix-app-service/build .
+WORKDIR /travel-token-matrix-app-service
+COPY --from=builder /travel-token-matrix-app-service/build .
 
-ENTRYPOINT [ "./camino-matrix-app-service" ]
+ENTRYPOINT [ "./travel-token-matrix-app-service" ]

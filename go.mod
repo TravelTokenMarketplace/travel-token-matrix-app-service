@@ -1,4 +1,4 @@
-module github.com/chain4travel/camino-matrix-app-service
+module github.com/TravelTokenMarketplace/travel-token-matrix-app-service
 
 go 1.25.10
 

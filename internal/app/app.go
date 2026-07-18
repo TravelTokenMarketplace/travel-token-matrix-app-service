@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/chain4travel/camino-matrix-app-service/config"
-	"github.com/chain4travel/camino-matrix-app-service/internal/service"
-	service_storage "github.com/chain4travel/camino-matrix-app-service/internal/storage/sqlite"
+	"github.com/TravelTokenMarketplace/travel-token-matrix-app-service/config"
+	"github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/service"
+	service_storage "github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/storage/sqlite"
 	"go.uber.org/zap"
 
 	"golang.org/x/sync/errgroup"
