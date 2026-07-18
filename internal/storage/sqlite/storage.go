@@ -10,7 +10,7 @@ import (
 	"errors"
 
 	"github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/service"
-	"github.com/chain4travel/camino-messenger-bot/v13/pkg/database/sqlite"
+	"github.com/TravelTokenMarketplace/travel-token-messenger-bot/v13/pkg/database/sqlite"
 	_ "github.com/golang-migrate/migrate/v4/source/file" // required by migrate
 	_ "github.com/mattn/go-sqlite3"                      // sql driver, required
 	"go.uber.org/zap"
