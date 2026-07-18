@@ -65,7 +65,7 @@ The **Travel Token Matrix App Service** is an extension component of the Travel 
 ### Docker Build
 Build the Docker image with:
 ```bash
-docker build -t c4tplatform/travel-token-matrix-app-service .
+docker build -t travel-token-matrix-app-service .
 ```
 
 ### Registration configuration
