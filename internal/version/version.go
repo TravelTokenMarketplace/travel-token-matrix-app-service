@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2026, Chain4Travel AG. All rights reserved.
+// Copyright (C) 2022-2026, Travel Token Marketplace. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package version
@@ -15,11 +15,11 @@ var (
 	// AppGitCommit is set by go build -ldflags
 	AppGitCommit = "Unspecified"
 
-	// BufBuildPBCMPRelease is set by go build -ldflags
-	BufBuildPBCMPRelease = "Unspecified"
+	// BufBuildPBTTMRelease is set by go build -ldflags
+	BufBuildPBTTMRelease = "Unspecified"
 
-	// BufBuildGRPCCMPRelease is set by go build -ldflags
-	BufBuildGRPCCMPRelease = "Unspecified"
+	// BufBuildGRPCTTMRelease is set by go build -ldflags
+	BufBuildGRPCTTMRelease = "Unspecified"
 
 	// BufBuildPBCommit set during init from pkg dependency version
 	BufBuildPBCommit = "Unspecified"
@@ -50,13 +50,13 @@ func init() {
 	FullVersion = fmt.Sprintf("%s (git: %s)\n\nlibs:\n  %s: %s (%s)\n  %s: %s (%s)\n  %s: %s",
 		AppVersion,
 		AppGitCommit,
-		"buf.build protocolbuffers ",
+		"buf.build protocolbuffers       ",
 		BufBuildPBCommit,
-		BufBuildPBCMPRelease,
-		"buf.build grpc            ",
+		BufBuildPBTTMRelease,
+		"buf.build grpc                  ",
 		BufBuildGRPCCommit,
-		BufBuildGRPCCMPRelease,
-		"camino-messenger-contracts",
+		BufBuildGRPCTTMRelease,
+		"travel-token-messenger-contracts",
 		ContractsGitCommit,
 	)
 }

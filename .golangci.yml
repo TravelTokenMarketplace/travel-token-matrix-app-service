@@ -46,7 +46,6 @@ linters:
       - legacy
       - std-error-handling
     paths:
-      - camino-matrix-go
       - third_party$
       - builtin$
       - examples$
@@ -60,7 +59,6 @@ formatters:
   exclusions:
     generated: lax
     paths:
-      - camino-matrix-go
       - third_party$
       - builtin$
       - examples$

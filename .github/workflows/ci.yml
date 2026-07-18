@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [c4t, dev]
+    branches: [dev]
   workflow_dispatch:
 
 # Cancel ongoing workflow runs if a new one is started
@@ -86,4 +86,4 @@ jobs:
           context: .
           push: false
           tags: |
-            c4tplatform/camino-matrix-app-service:temp
+            travel-token-matrix-app-service:temp

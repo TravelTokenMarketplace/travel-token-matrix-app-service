@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Set the output binary name
-OUTPUT_BINARY="build/camino-matrix-app-service"
+OUTPUT_BINARY="build/travel-token-matrix-app-service"
 
 # Set the main source file
 MAIN_SOURCE="main.go"
@@ -48,25 +48,25 @@ version_lt() {
 }
 
 if version_lt "$(go_version)" "$go_version_minimum"; then
-    echo "camino-matrix-app-service requires Go >= $go_version_minimum, Go $(go_version) found." >&2
+    echo "travel-token-matrix-app-service requires Go >= $go_version_minimum, Go $(go_version) found." >&2
     exit 1
 fi
 
 echo "Starting build process..."
 
-if [ -z "${CAMINO_APP_SERVICE_PATH}" ]; then
-	# camino-matrix-app-service root folder
-	CAMINO_APP_SERVICE_PATH=$(
+if [ -z "${TTM_APP_SERVICE_PATH}" ]; then
+	# travel-token-matrix-app-service root folder
+	TTM_APP_SERVICE_PATH=$(
 		cd "$(dirname "${BASH_SOURCE[0]}")" || exit
 		cd .. && pwd
 	)
 fi
-echo "cd $CAMINO_APP_SERVICE_PATH"
-cd "$CAMINO_APP_SERVICE_PATH" || exit
+echo "cd $TTM_APP_SERVICE_PATH"
+cd "$TTM_APP_SERVICE_PATH" || exit
 
 # Load the constants
 echo "Preparing constants..."
-source "$CAMINO_APP_SERVICE_PATH"/scripts/constants.sh
+source "$TTM_APP_SERVICE_PATH"/scripts/constants.sh
 
 echo "  DEBUG                  : $DEBUG"
 echo "  git_tag                : $git_tag"
@@ -76,11 +76,11 @@ echo "  grpc_release           : $grpc_release"
 
 LDFLAGS="-X github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/version.AppGitCommit=$git_commit"
 LDFLAGS="$LDFLAGS -X github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/version.AppVersion=$git_tag"
-LDFLAGS="$LDFLAGS -X github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/version.BufBuildPBCMPRelease=$protocolbuffers_release"
-LDFLAGS="$LDFLAGS -X github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/version.BufBuildGRPCCMPRelease=$grpc_release"
+LDFLAGS="$LDFLAGS -X github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/version.BufBuildPBTTMRelease=$protocolbuffers_release"
+LDFLAGS="$LDFLAGS -X github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/version.BufBuildGRPCTTMRelease=$grpc_release"
 
 # Build the Go application
-echo "Building camino-matrix-app-service..."
+echo "Building travel-token-matrix-app-service..."
 if [ "$DEBUG" = true ]; then
 	BUILD_CMD="go build -o ${OUTPUT_BINARY} -ldflags \"$LDFLAGS\" -gcflags \"all=-N -l\" ${MAIN_SOURCE}"
 else
@@ -92,7 +92,7 @@ echo "$BUILD_CMD"
 
 if eval "$BUILD_CMD"
 then
-	echo "Output binary: ${CAMINO_APP_SERVICE_PATH}/${OUTPUT_BINARY}"
+	echo "Output binary: ${TTM_APP_SERVICE_PATH}/${OUTPUT_BINARY}"
 	echo "Build successful!"
 else
 	echo "Build failed."

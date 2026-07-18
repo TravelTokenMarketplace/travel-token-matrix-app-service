@@ -1,5 +1,5 @@
 db:
-    path: camino-matrix-app-service-db
+    path: travel-token-matrix-app-service-db
 log_level: debug
 matrix:
     access_token: ugw8243igya57aaABGFfgeyu

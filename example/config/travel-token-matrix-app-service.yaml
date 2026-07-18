@@ -12,7 +12,7 @@ log_level: debug
 ### Database
 db:
     # Path to database dir
-    path: camino-matrix-app-service-db
+    path: travel-token-matrix-app-service-db
 
 
 
