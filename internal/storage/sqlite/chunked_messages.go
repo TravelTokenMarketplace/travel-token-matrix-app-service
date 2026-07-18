@@ -10,7 +10,7 @@ import (
 	"fmt"
 
 	"github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/service"
-	"github.com/chain4travel/camino-messenger-bot/v13/pkg/database/sqlite"
+	"github.com/TravelTokenMarketplace/travel-token-messenger-bot/v13/pkg/database/sqlite"
 	"github.com/jmoiron/sqlx"
 )
 

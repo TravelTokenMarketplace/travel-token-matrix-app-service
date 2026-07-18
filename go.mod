@@ -3,7 +3,7 @@ module github.com/TravelTokenMarketplace/travel-token-matrix-app-service
 go 1.25.10
 
 require (
-	github.com/chain4travel/camino-messenger-bot/v13 v13.0.0
+	github.com/TravelTokenMarketplace/travel-token-messenger-bot/v13 v13.1.0-rc.2.0.20260718165130-c49ae0ed0a37
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/golang-migrate/migrate/v4 v4.19.0
@@ -70,7 +70,6 @@ require (
 )
 
 replace (
-	github.com/chain4travel/camino-messenger-bot/v13 => github.com/TravelTokenMarketplace/camino-messenger-bot/v13 v13.1.0-rc.1.0.20260711115550-98f847f3a5e6
 	github.com/consensys/gnark-crypto => github.com/consensys/gnark-crypto v0.18.2
 	github.com/quic-go/quic-go => github.com/quic-go/quic-go v0.55.0
 )

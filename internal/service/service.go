@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/chain4travel/camino-messenger-bot/v13/pkg/matrix"
+	"github.com/TravelTokenMarketplace/travel-token-messenger-bot/v13/pkg/matrix"
 	"go.uber.org/zap"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"

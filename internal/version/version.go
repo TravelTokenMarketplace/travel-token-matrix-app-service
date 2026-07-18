@@ -38,11 +38,11 @@ func init() {
 	info, _ := debug.ReadBuildInfo()
 	for _, dependency := range info.Deps {
 		switch dependency.Path {
-		case "buf.build/gen/go/chain4travel/camino-messenger-protocol/protocolbuffers/go":
+		case "buf.build/gen/go/ttm/messenger-protocol/protocolbuffers/go":
 			BufBuildPBCommit = dependency.Version
-		case "buf.build/gen/go/chain4travel/camino-messenger-protocol/grpc/go":
+		case "buf.build/gen/go/ttm/messenger-protocol/grpc/go":
 			BufBuildGRPCCommit = dependency.Version
-		case "github.com/chain4travel/camino-messenger-contracts/go/contracts":
+		case "github.com/TravelTokenMarketplace/travel-token-messenger-contracts/go/contracts":
 			ContractsGitCommit = dependency.Version
 		}
 	}
