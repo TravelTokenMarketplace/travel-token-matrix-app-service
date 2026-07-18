@@ -9,9 +9,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/chain4travel/camino-matrix-app-service/config"
-	"github.com/chain4travel/camino-matrix-app-service/internal/app"
-	"github.com/chain4travel/camino-matrix-app-service/internal/version"
+	"github.com/TravelTokenMarketplace/travel-token-matrix-app-service/config"
+	"github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/app"
+	"github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/version"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"

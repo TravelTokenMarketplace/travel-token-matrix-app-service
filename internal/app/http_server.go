@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chain4travel/camino-matrix-app-service/internal/service"
+	"github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/service"
 	"go.uber.org/zap"
 	"maunium.net/go/mautrix/event"
 
