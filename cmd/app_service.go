@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2026, Chain4Travel AG. All rights reserved.
+// Copyright (C) 2022-2026, Travel Token Marketplace. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package cmd
@@ -23,10 +23,10 @@ const (
 )
 
 var rootCmd = &cobra.Command{
-	Use:        "camino-matrix-app-service",
-	Short:      "starts camino matrix app-service",
+	Use:        "travel-token-matrix-app-service",
+	Short:      "starts travel token matrix app-service",
 	Version:    Version,
-	SuggestFor: []string{"camino-matrix", "matrix-app-service", "camino-app-service", "app-service"},
+	SuggestFor: []string{"travel-token-matrix", "matrix-app-service", "ttm-app-service", "app-service"},
 	RunE:       rootFunc,
 }
 
@@ -72,9 +72,9 @@ func rootFunc(cmd *cobra.Command, _ []string) error {
 	defer func() { _ = logger.Sync() }()
 
 	logger.Infof("App version: %s (git: %s)", version.AppVersion, version.AppGitCommit)
-	logger.Infof("buf.build protocolbuffers version: %s (CMP %s)", version.BufBuildPBCommit, version.BufBuildPBCMPRelease)
-	logger.Infof("buf.build grpc version: %s (CMP %s)", version.BufBuildGRPCCommit, version.BufBuildGRPCCMPRelease)
-	logger.Infof("camino-messenger-contracts version: %s", version.ContractsGitCommit)
+	logger.Infof("buf.build protocolbuffers version: %s (TTM %s)", version.BufBuildPBCommit, version.BufBuildPBTTMRelease)
+	logger.Infof("buf.build grpc version: %s (TTM %s)", version.BufBuildGRPCCommit, version.BufBuildGRPCTTMRelease)
+	logger.Infof("travel-token-messenger-contracts version: %s", version.ContractsGitCommit)
 
 	app, err := app.NewApp(ctx, logger, cfg)
 	if err != nil {

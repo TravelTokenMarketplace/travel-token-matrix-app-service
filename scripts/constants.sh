@@ -8,9 +8,9 @@ current_branch_temp=$(git symbolic-ref -q --short HEAD || git describe --tags --
 # replace / with - to be a docker tag compatible
 current_branch=${current_branch_temp////-}
 
-# camino-matrix-app-service git tag and sha
-git_commit=${CAMINO_APP_SERVICE_COMMIT:-$(git rev-parse --short HEAD)}
-git_tag=${CAMINO_APP_SERVICE_TAG:-$(git describe --tags --always --dirty || echo unknown)}
+# travel-token-matrix-app-service git tag and sha
+git_commit=${TTM_APP_SERVICE_COMMIT:-$(git rev-parse --short HEAD)}
+git_tag=${TTM_APP_SERVICE_TAG:-$(git describe --tags --always --dirty || echo unknown)}
 
 # get protocol releases from buf.build
 grpc_release=$("${SCRIPT_DIR}"/resolve_protocol_release.sh buf.build/gen/go/ttm/messenger-protocol/grpc/go)

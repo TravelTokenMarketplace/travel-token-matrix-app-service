@@ -24,9 +24,9 @@ install_golangci_lint() {
 # Function to check license headers in go files
 check_license_header() {
 	go install -v github.com/chain4travel/camino-license@v0.1.0
-	CAMINO_APP_SERVICE_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)
-	echo "camino-license check --config=./header.yaml '${CAMINO_APP_SERVICE_PATH}'"
-	camino-license check --config=./header.yaml "${CAMINO_APP_SERVICE_PATH}"
+	TTM_APP_SERVICE_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)
+	echo "camino-license check --config=./header.yaml '${TTM_APP_SERVICE_PATH}'"
+	camino-license check --config=./header.yaml "${TTM_APP_SERVICE_PATH}"
 }
 
 # Check if golangci-lint is installed

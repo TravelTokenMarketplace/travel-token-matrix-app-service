@@ -1,6 +1,6 @@
-# Camino Matrix App Service
+# Travel Token Matrix App Service
 
-The **Camino Matrix App Service** is an extension component of the Camino Messenger network. It runs alongside the Matrix homeserver (`camino-conduit`) to process, audit, and validate message transfers, focusing on fee compliance (Network Fees) and bot behavior.
+The **Travel Token Matrix App Service** is an extension component of the Travel Token Messenger network. It runs alongside the Matrix homeserver (`camino-conduit`) to process, audit, and validate message transfers, focusing on fee compliance (Network Fees) and bot behavior.
 
 ---
 
@@ -16,7 +16,7 @@ The **Camino Matrix App Service** is an extension component of the Camino Messen
                               │
                               ▼
            ┌──────────────────────────────────┐
-           │    Camino Matrix App Service     │
+           │ Travel Token Matrix App Service  │
            │                                  │
            │  1. Verifies signed message sigs │
            │  2. Validates off-chain cheques   │
@@ -65,13 +65,13 @@ The **Camino Matrix App Service** is an extension component of the Camino Messen
 ### Docker Build
 Build the Docker image with:
 ```bash
-docker build -t c4tplatform/camino-matrix-app-service .
+docker build -t travel-token-matrix-app-service .
 ```
 
 ### Registration configuration
-- **Conduit Integration**: When using `camino-conduit`, registration is automated at startup using settings in `conduit.toml` (`camino_app_service_url`, `camino_app_service_as_token`, `camino_app_service_hs_token`).
-- **Synapse Integration**: If running with a standard Synapse server, register by placing the appservice registration yaml file at `files/matrix/.synapse/camino.yaml` (see [example/config/synapse/camino.yaml](example/config/synapse/camino.yaml)).
+- **Conduit Integration**: When using `camino-conduit`, registration is automated at startup using settings in `conduit.toml` (`ttm_app_service_url`, `ttm_app_service_as_token`, `ttm_app_service_hs_token`).
+- **Synapse Integration**: If running with a standard Synapse server, register by placing the appservice registration yaml file at `files/matrix/.synapse/ttm.yaml` (see [example/config/synapse/ttm.yaml](example/config/synapse/ttm.yaml)).
 
 ### App-Service configuration
-The app-service expects its configuration yaml at `/camino-matrix-app-service/camino-matrix-app-service.yaml`.
-Refer to [example/config/camino-matrix-app-service.yaml](example/config/camino-matrix-app-service.yaml) for a configuration template.
+The app-service expects its configuration yaml at `/travel-token-matrix-app-service/travel-token-matrix-app-service.yaml`.
+Refer to [example/config/travel-token-matrix-app-service.yaml](example/config/travel-token-matrix-app-service.yaml) for a configuration template.
