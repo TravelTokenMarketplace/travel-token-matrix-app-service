@@ -3,7 +3,7 @@ module github.com/TravelTokenMarketplace/travel-token-matrix-app-service
 go 1.25.10
 
 require (
-	github.com/TravelTokenMarketplace/travel-token-messenger-bot/v13 v13.1.0-rc.2.0.20260718165130-c49ae0ed0a37
+	github.com/TravelTokenMarketplace/travel-token-messenger-bot/v13 v13.1.0-rc.3
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/golang-migrate/migrate/v4 v4.19.0
