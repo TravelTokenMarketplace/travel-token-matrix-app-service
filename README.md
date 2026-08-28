@@ -3,7 +3,7 @@
 The **Travel Token Matrix App Service** is an extension component of the Travel Token Messenger network. It runs alongside the Matrix homeserver (`camino-conduit`) and observes message traffic: it checks that events are structurally well-formed and tracks multi-chunk messages, so that a bot which breaks the wire protocol can be identified.
 
 > [!IMPORTANT]
-> **This component provides no cryptographic assurance.** It does not verify signatures. See [Signature verification](#2-structural-verification-not-signature-verification) below for what it actually checks and where real verification happens.
+> **This component provides no cryptographic assurance.** It does not verify signatures. See [Architectural Role & Function](#architectural-role--function) below for what it actually checks and where real verification happens.
 
 ---
 
@@ -44,7 +44,7 @@ The **Travel Token Matrix App Service** is an extension component of the Travel 
    - Signatures are verified by the bots at the ends of the conversation, which have the sender's account and the key material to do it. This component deliberately does not duplicate that: it sees the same bytes but adds no independent trust, and duplicating the crypto here would suggest an assurance that is not being provided.
 3. **Chunk tracking**:
    - Large payloads (such as extensive search results) are split across a signed message plus a number of `MessageChunk` events. The App Service records **which chunk indices** have arrived for each message, so it can tell when a message is complete and when a sender sent an index it never declared.
-   - Indices are tracked as a set rather than counted, because Matrix redelivers events: counting arrivals cannot distinguish a redelivered chunk from a new one.
+   - Indices are tracked as a set rather than counted, because Matrix redelivers events: counting arrivals cannot distinguish a redelivered chunk from a new one. Each index is recorded with the account that sent it, so an index that only later turns out to be out of range is still attributed to whoever sent it.
    - Incomplete messages are swept after a fixed time-to-live, so a peer that starts messages it never finishes cannot grow the tracking table without bound.
 
 ---
@@ -61,6 +61,10 @@ A sender is flagged for exactly two things, both of which only the sender can ca
 
 - event content that fails structural verification (zero chunk count, zero chunk index, empty message id or data);
 - a chunk index at or beyond the chunk count the message declared.
+
+The second is checked without regard to arrival order. A chunk can overtake the signed message that declares the count, and until that count is known there is nothing to judge the index against, so recorded indices are re-examined once it arrives. Checking only the index in hand would have meant an out-of-range chunk went unflagged whenever it arrived first — the order a sender doing it deliberately would choose.
+
+What is flagged is the account that **sent** the offending chunk, which is not necessarily the sender of the event that exposed it. A message id is chosen by its sender and nothing binds one to a single account, so each chunk records who sent it; otherwise one peer could get another flagged by planting a stray index under its message id.
 
 Deliberately **not** flagged:
 
