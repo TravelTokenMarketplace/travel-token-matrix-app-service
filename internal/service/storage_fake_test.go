@@ -15,7 +15,7 @@ import (
 type fakeStorage struct {
 	expected  map[string]uint32
 	firstSeen map[string]time.Time
-	indices   map[string]map[uint32]bool
+	indices   map[string]map[uint32]string // messageID -> index -> sender
 
 	// failOn makes the named method return an error, to exercise the
 	// "our failure, not the sender's" path.
@@ -29,7 +29,7 @@ func newFakeStorage() *fakeStorage {
 	return &fakeStorage{
 		expected:  map[string]uint32{},
 		firstSeen: map[string]time.Time{},
-		indices:   map[string]map[uint32]bool{},
+		indices:   map[string]map[uint32]string{},
 	}
 }
 
@@ -58,20 +58,21 @@ func (f *fakeStorage) Commit(Session) error { f.commits++; return nil }
 func (f *fakeStorage) Abort(Session)        { f.aborts++ }
 
 func (f *fakeStorage) AddChunkIndex(
-	_ context.Context, _ Session, messageID string, chunkIndex uint32, firstSeenAt time.Time,
+	_ context.Context, _ Session, messageID string, chunkIndex uint32, sender string, firstSeenAt time.Time,
 ) (bool, error) {
 	if err := f.fail("AddChunkIndex"); err != nil {
 		return false, err
 	}
 	if _, ok := f.indices[messageID]; !ok {
-		f.indices[messageID] = map[uint32]bool{}
+		f.indices[messageID] = map[uint32]string{}
 		f.firstSeen[messageID] = firstSeenAt
 		f.expected[messageID] = 0
 	}
-	if f.indices[messageID][chunkIndex] {
+	if _, ok := f.indices[messageID][chunkIndex]; ok {
+		// Like INSERT OR IGNORE: the first sender of an index keeps the row.
 		return false, nil
 	}
-	f.indices[messageID][chunkIndex] = true
+	f.indices[messageID][chunkIndex] = sender
 	return true, nil
 }
 
@@ -108,6 +109,39 @@ func (f *fakeStorage) CountChunkIndicesBelow(
 		}
 	}
 	return count, nil
+}
+
+func (f *fakeStorage) FindChunkIndexAtOrAbove(
+	_ context.Context, _ Session, messageID string, limit uint32,
+) (uint32, string, error) {
+	if err := f.fail("FindChunkIndexAtOrAbove"); err != nil {
+		return 0, "", err
+	}
+	found := false
+	var lowest uint32
+	for index := range f.indices[messageID] {
+		if index >= limit && (!found || index < lowest) {
+			lowest, found = index, true
+		}
+	}
+	if !found {
+		return 0, "", ErrNotFound
+	}
+	return lowest, f.indices[messageID][lowest], nil
+}
+
+func (f *fakeStorage) DeleteChunkIndicesAtOrAbove(
+	_ context.Context, _ Session, messageID string, limit uint32,
+) error {
+	if err := f.fail("DeleteChunkIndicesAtOrAbove"); err != nil {
+		return err
+	}
+	for index := range f.indices[messageID] {
+		if index >= limit {
+			delete(f.indices[messageID], index)
+		}
+	}
+	return nil
 }
 
 func (f *fakeStorage) DeleteChunkedMessage(_ context.Context, _ Session, messageID string) error {

@@ -24,14 +24,31 @@ const (
 var testNow = time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
 
 func newTestService(storage *fakeStorage) (*service, *int) {
-	bans := 0
+	svc, banned := newTestServiceRecordingBans(storage)
+	return svc, &banned.count
+}
+
+// bannedUsers records who was banned, not merely how many times, because an
+// out-of-range chunk must be charged to the account that sent it rather than to
+// the account whose event happened to reveal it.
+type bannedUsers struct {
+	count int
+	users []id.UserID
+}
+
+func newTestServiceRecordingBans(storage *fakeStorage) (*service, *bannedUsers) {
+	banned := &bannedUsers{}
 	svc := &service{
 		logger:  zap.NewNop().Sugar(),
 		storage: storage,
 		now:     func() time.Time { return testNow },
-		banUser: func(context.Context, id.UserID) error { bans++; return nil },
+		banUser: func(_ context.Context, userID id.UserID) error {
+			banned.count++
+			banned.users = append(banned.users, userID)
+			return nil
+		},
 	}
-	return svc, &bans
+	return svc, banned
 }
 
 // rawContent renders the event body the way the homeserver delivers it:
@@ -58,9 +75,13 @@ func signedMessageEvent(messageID string, chunksCount uint32) event.Event {
 }
 
 func chunkEvent(messageID string, chunkIndex uint32) event.Event {
+	return chunkEventFrom(messageID, chunkIndex, testSender)
+}
+
+func chunkEventFrom(messageID string, chunkIndex uint32, sender id.UserID) event.Event {
 	return event.Event{
 		ID:     id.EventID("$chunk-" + messageID),
-		Sender: testSender,
+		Sender: sender,
 		Type:   matrix.EventTypeMessageChunk,
 		Content: rawContent(map[string]any{
 			"MessageID":  messageID,
@@ -167,7 +188,7 @@ func TestUnparseableContentIsDroppedWithoutABan(t *testing.T) {
 
 // Our own failures must still fail the transaction, so the homeserver retries.
 func TestStorageFailureFailsTheTransaction(t *testing.T) {
-	for _, method := range []string{"NewSession", "AddChunkIndex", "CountChunkIndicesBelow"} {
+	for _, method := range []string{"NewSession", "AddChunkIndex", "CountChunkIndicesBelow", "FindChunkIndexAtOrAbove"} {
 		t.Run(method, func(t *testing.T) {
 			storage := newFakeStorage()
 			storage.failOn = method
@@ -220,4 +241,59 @@ func TestSweepStalePartialMessages(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), swept)
 	require.False(t, storage.tracked(testMessageID))
+}
+
+// A sender chooses the order it sends in, so checking only the index in hand
+// let an out-of-range chunk through whenever it arrived before the count that
+// would have condemned it — which is the order anyone doing it deliberately
+// would pick.
+func TestOutOfRangeChunkArrivingBeforeTheDeclarationIsStillMisbehaviour(t *testing.T) {
+	storage := newFakeStorage()
+	svc, bans := newTestService(storage)
+
+	require.NoError(t, svc.ProcessEvents(context.Background(), []event.Event{
+		chunkEvent(testMessageID, 7),
+		signedMessageEvent(testMessageID, 2),
+	}))
+	require.Equal(t, 1, *bans, "reordering must not launder an out-of-range chunk")
+}
+
+// A message id is picked by its sender and nothing binds one to a single
+// account, so a peer can plant a stray index under someone else's message id.
+// The ban has to follow the chunk, not the event that exposed it.
+func TestTheSenderOfTheStrayChunkIsBannedNotTheDeclarant(t *testing.T) {
+	const intruder = id.UserID("@intruder:example.org")
+
+	storage := newFakeStorage()
+	svc, banned := newTestServiceRecordingBans(storage)
+
+	require.NoError(t, svc.ProcessEvents(context.Background(), []event.Event{
+		chunkEventFrom(testMessageID, 9, intruder),
+		signedMessageEvent(testMessageID, 2),
+	}))
+
+	require.Equal(t, []id.UserID{intruder}, banned.users,
+		"the account that declared the count did not send the stray index")
+}
+
+// Once reported, a stray index is dropped: it can never help complete the
+// message, and leaving it would re-accuse its sender on every later chunk.
+func TestAnOutOfRangeChunkIsReportedOnceAndTheMessageStillCompletes(t *testing.T) {
+	storage := newFakeStorage()
+	svc, bans := newTestService(storage)
+
+	require.NoError(t, svc.ProcessEvents(context.Background(), []event.Event{
+		chunkEvent(testMessageID, 9),
+		signedMessageEvent(testMessageID, 3),
+	}))
+	require.Equal(t, 1, *bans)
+
+	// Index 1 completes indices 0..2; the stray must not be re-reported, and
+	// must not stop the message being recognised as complete.
+	require.NoError(t, svc.ProcessEvents(context.Background(), []event.Event{
+		chunkEvent(testMessageID, 1),
+		chunkEvent(testMessageID, 2),
+	}))
+	require.Equal(t, 1, *bans, "the same stray index must not be reported again")
+	require.False(t, storage.tracked(testMessageID), "indices 0..2 are all present")
 }

@@ -22,18 +22,20 @@ type Storage interface {
 // that never arrived, and let a compliant sender look like it had sent more
 // chunks than it declared.
 type MessageChunksStorage interface {
-	// AddChunkIndex records that chunkIndex of messageID has arrived, creating
-	// the message's tracking record if this is the first chunk seen for it.
-	// firstSeenAt is used only when the record is created.
+	// AddChunkIndex records that chunkIndex of messageID has arrived from
+	// sender, creating the message's tracking record if this is the first chunk
+	// seen for it. firstSeenAt is used only when the record is created.
 	//
 	// It reports whether the index was newly recorded. False means this exact
 	// index had already arrived — a redelivery, which is normal and not the
-	// sender's fault.
+	// sender's fault. The sender stored is therefore the first one to send that
+	// index; a redelivery does not overwrite it.
 	AddChunkIndex(
 		ctx context.Context,
 		session Session,
 		messageID string,
 		chunkIndex uint32,
+		sender string,
 		firstSeenAt time.Time,
 	) (recorded bool, err error)
 
@@ -67,6 +69,36 @@ type MessageChunksStorage interface {
 		messageID string,
 		limit uint32,
 	) (uint32, error)
+
+	// FindChunkIndexAtOrAbove returns one recorded index at or beyond limit for
+	// messageID, together with the account that sent it, and ErrNotFound when
+	// there is none.
+	//
+	// An index is out of range only relative to a declared chunk count, and the
+	// count arrives in its own event which a chunk can overtake. So a chunk
+	// cannot always be judged when it is seen, and the check has to be able to
+	// look back over what was already recorded once the count is known.
+	//
+	// It returns the sender because the account that declares the count need
+	// not be the account that sent the offending index — a message id is picked
+	// by the sender and nothing binds one to a single account.
+	FindChunkIndexAtOrAbove(
+		ctx context.Context,
+		session Session,
+		messageID string,
+		limit uint32,
+	) (chunkIndex uint32, sender string, err error)
+
+	// DeleteChunkIndicesAtOrAbove removes recorded indices at or beyond limit
+	// for messageID. Out-of-range indices are dropped once they have been
+	// reported, so the same one is not reported again for every later chunk of
+	// the same message.
+	DeleteChunkIndicesAtOrAbove(
+		ctx context.Context,
+		session Session,
+		messageID string,
+		limit uint32,
+	) error
 
 	// DeleteChunkedMessage removes a message's tracking record and every chunk
 	// index recorded for it.

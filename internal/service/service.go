@@ -42,7 +42,14 @@ type Service interface {
 	SweepStalePartialMessages(ctx context.Context, now time.Time) (int64, error)
 }
 
-// eventOutcome is what processing one event concluded about its SENDER.
+// eventOutcome is what processing one event concluded about a sender.
+//
+// Which sender is a separate question from which event: an out-of-range chunk
+// can only be recognised once the chunk count is declared, and the event that
+// declares it may come from a different account than the one that sent the
+// chunk. So outcomeMisbehaviour is always paired with the account actually
+// responsible, which the caller bans — never simply the sender of whichever
+// event happened to reveal the problem.
 //
 // It is deliberately separate from the error return. An error means this
 // app-service failed — storage broke, a session could not be opened — and must
@@ -105,7 +112,7 @@ func (s *service) ProcessEvents(ctx context.Context, events []event.Event) error
 		// so we need to set it manually to allow mautrix to parse content correctly
 		evnt.Type.Class = event.MessageEventType
 
-		outcome, err := s.processMessageEvent(ctx, &evnt)
+		outcome, offender, err := s.processMessageEvent(ctx, &evnt)
 		if err != nil {
 			// Our failure, not the sender's: fail the transaction so the
 			// homeserver redelivers it.
@@ -113,7 +120,7 @@ func (s *service) ProcessEvents(ctx context.Context, events []event.Event) error
 		}
 
 		if outcome == outcomeMisbehaviour {
-			if err := s.banUser(ctx, evnt.Sender); err != nil {
+			if err := s.banUser(ctx, offender); err != nil {
 				return err
 			}
 		}
@@ -121,7 +128,7 @@ func (s *service) ProcessEvents(ctx context.Context, events []event.Event) error
 	return nil
 }
 
-func (s *service) processMessageEvent(ctx context.Context, evnt *event.Event) (eventOutcome, error) {
+func (s *service) processMessageEvent(ctx context.Context, evnt *event.Event) (eventOutcome, id.UserID, error) {
 	s.logger.Debugf("Processing event %s (%s) from %s", evnt.ID, evnt.Type.Type, evnt.Sender)
 	defer s.logger.Debugf("Finished processing event %s (%s) from %s", evnt.ID, evnt.Type.Type, evnt.Sender)
 
@@ -131,7 +138,7 @@ func (s *service) processMessageEvent(ctx context.Context, evnt *event.Event) (e
 		// to be ours as theirs. Dropping it keeps the transaction succeeding,
 		// which matters more than punishing a sender we cannot be sure about.
 		s.logger.Warnf("Event %s from %s: dropping, failed to parse content: %v", evnt.ID, evnt.Sender, err)
-		return outcomeDropped, nil
+		return outcomeDropped, "", nil
 	}
 
 	switch eventContent := evnt.Content.Parsed.(type) {
@@ -142,7 +149,7 @@ func (s *service) processMessageEvent(ctx context.Context, evnt *event.Event) (e
 	}
 
 	s.logger.Warnf("Event %s from %s: dropping, unsupported event type %s", evnt.ID, evnt.Sender, evnt.Type.Type)
-	return outcomeDropped, nil
+	return outcomeDropped, "", nil
 }
 
 // processSignedMessageEvent handles the event that opens a message. It carries
@@ -151,15 +158,15 @@ func (s *service) processSignedMessageEvent(
 	ctx context.Context,
 	eventContent *matrix.SignedMessageEventContent,
 	evnt *event.Event,
-) (eventOutcome, error) {
+) (eventOutcome, id.UserID, error) {
 	if err := eventContent.Verify(); err != nil {
 		s.logger.Infof("Event %s, message %s from %s: invalid event content: %v", evnt.ID, eventContent.MessageID, evnt.Sender, err)
-		return outcomeMisbehaviour, nil
+		return outcomeMisbehaviour, evnt.Sender, nil
 	}
 
 	// A single-chunk message is complete on arrival and never needs tracking.
 	if eventContent.ChunksCount == 1 {
-		return outcomeAccepted, nil
+		return outcomeAccepted, "", nil
 	}
 
 	return s.recordChunk(ctx, eventContent.MessageID, 0, eventContent.ChunksCount, evnt)
@@ -169,10 +176,10 @@ func (s *service) processMessageChunkEvent(
 	ctx context.Context,
 	eventContent *matrix.MessageChunkEventContent,
 	evnt *event.Event,
-) (eventOutcome, error) {
+) (eventOutcome, id.UserID, error) {
 	if err := eventContent.Verify(); err != nil {
 		s.logger.Infof("Event %s, message %s from %s: invalid event content: %v", evnt.ID, eventContent.MessageID, evnt.Sender, err)
-		return outcomeMisbehaviour, nil
+		return outcomeMisbehaviour, evnt.Sender, nil
 	}
 
 	// A chunk event carries no chunk count; only the signed message does, and
@@ -194,20 +201,20 @@ func (s *service) recordChunk(
 	chunkIndex uint32,
 	expectedChunksCount uint32,
 	evnt *event.Event,
-) (eventOutcome, error) {
+) (eventOutcome, id.UserID, error) {
 	session, err := s.storage.NewSession(ctx)
 	if err != nil {
 		err = fmt.Errorf("failed to create storage session: %w", err)
 		s.logger.Errorf("Event %s, message %s: %v", evnt.ID, messageID, err)
-		return outcomeAccepted, err
+		return outcomeAccepted, "", err
 	}
 	defer s.storage.Abort(session)
 
-	recorded, err := s.storage.AddChunkIndex(ctx, session, messageID, chunkIndex, s.now())
+	recorded, err := s.storage.AddChunkIndex(ctx, session, messageID, chunkIndex, string(evnt.Sender), s.now())
 	if err != nil {
 		err = fmt.Errorf("failed to record chunk index: %w", err)
 		s.logger.Errorf("Event %s, message %s: %v", evnt.ID, messageID, err)
-		return outcomeAccepted, err
+		return outcomeAccepted, "", err
 	}
 	if !recorded {
 		// The same index arriving twice is ordinary Matrix redelivery, not the
@@ -220,48 +227,89 @@ func (s *service) recordChunk(
 		if err := s.storage.SetExpectedChunksCount(ctx, session, messageID, expectedChunksCount); err != nil {
 			err = fmt.Errorf("failed to set expected chunks count: %w", err)
 			s.logger.Errorf("Event %s, message %s: %v", evnt.ID, messageID, err)
-			return outcomeAccepted, err
+			return outcomeAccepted, "", err
 		}
 	} else {
 		expectedChunksCount, err = s.storage.GetExpectedChunksCount(ctx, session, messageID)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			err = fmt.Errorf("failed to get expected chunks count: %w", err)
 			s.logger.Errorf("Event %s, message %s: %v", evnt.ID, messageID, err)
-			return outcomeAccepted, err
+			return outcomeAccepted, "", err
 		}
 	}
 
 	// Still waiting on the signed message that declares the count. The chunk is
-	// recorded and will be counted once the count is known.
+	// recorded and will be judged once the count is known.
 	if expectedChunksCount == 0 {
-		return outcomeAccepted, s.storage.Commit(session)
+		return outcomeAccepted, "", s.storage.Commit(session)
 	}
 
-	// An index at or beyond the declared count cannot belong to this message.
-	// Unlike the arrival-count check it replaces, this cannot be produced by a
-	// redelivery, so it only ever accuses a sender that really did send it.
-	if chunkIndex >= expectedChunksCount {
-		s.logger.Infof("Event %s, message %s from %s: chunk index %d is beyond the declared chunk count %d",
-			evnt.ID, messageID, evnt.Sender, chunkIndex, expectedChunksCount)
-		return outcomeMisbehaviour, nil
+	outcome, offender, err := s.reportOutOfRangeChunks(ctx, session, messageID, expectedChunksCount, evnt)
+	if err != nil {
+		return outcomeAccepted, "", err
 	}
 
 	presentChunks, err := s.storage.CountChunkIndicesBelow(ctx, session, messageID, expectedChunksCount)
 	if err != nil {
 		err = fmt.Errorf("failed to count chunk indices: %w", err)
 		s.logger.Errorf("Event %s, message %s: %v", evnt.ID, messageID, err)
-		return outcomeAccepted, err
+		return outcomeAccepted, "", err
 	}
 
 	if presentChunks == expectedChunksCount {
 		if err := s.storage.DeleteChunkedMessage(ctx, session, messageID); err != nil {
 			err = fmt.Errorf("failed to delete chunked message: %w", err)
 			s.logger.Errorf("Event %s, message %s: %v", evnt.ID, messageID, err)
-			return outcomeAccepted, err
+			return outcomeAccepted, "", err
 		}
 	}
 
-	return outcomeAccepted, s.storage.Commit(session)
+	return outcome, offender, s.storage.Commit(session)
+}
+
+// reportOutOfRangeChunks looks for a recorded index that the now-known chunk
+// count says cannot belong to the message, and reports whoever sent it.
+//
+// It searches storage rather than checking only the index in hand, because the
+// two events involved are not ordered: a chunk can arrive before the signed
+// message that declares the count, and until that count is known there is
+// nothing to judge the index against. Checking only the current event let a
+// sender launder an out-of-range chunk by simply sending it first — which is
+// the order a sender doing it on purpose would pick.
+//
+// The offending indices are deleted once reported. They can never help complete
+// the message (completeness counts only indices below the declared count), so
+// nothing is lost, and it stops the same stray index being re-reported for
+// every subsequent chunk of the same message.
+func (s *service) reportOutOfRangeChunks(
+	ctx context.Context,
+	session Session,
+	messageID string,
+	expectedChunksCount uint32,
+	evnt *event.Event,
+) (eventOutcome, id.UserID, error) {
+	outOfRangeIndex, sender, err := s.storage.FindChunkIndexAtOrAbove(ctx, session, messageID, expectedChunksCount)
+	if errors.Is(err, ErrNotFound) {
+		return outcomeAccepted, "", nil
+	}
+	if err != nil {
+		err = fmt.Errorf("failed to look for out-of-range chunk indices: %w", err)
+		s.logger.Errorf("Event %s, message %s: %v", evnt.ID, messageID, err)
+		return outcomeAccepted, "", err
+	}
+
+	// The sender comes from the stored row, not from evnt: the account that
+	// declared the count is not necessarily the one that sent the stray index.
+	s.logger.Infof("Event %s, message %s from %s: chunk index %d is beyond the declared chunk count %d",
+		evnt.ID, messageID, sender, outOfRangeIndex, expectedChunksCount)
+
+	if err := s.storage.DeleteChunkIndicesAtOrAbove(ctx, session, messageID, expectedChunksCount); err != nil {
+		err = fmt.Errorf("failed to delete out-of-range chunk indices: %w", err)
+		s.logger.Errorf("Event %s, message %s: %v", evnt.ID, messageID, err)
+		return outcomeAccepted, "", err
+	}
+
+	return outcomeMisbehaviour, id.UserID(sender), nil
 }
 
 func (s *service) SweepStalePartialMessages(ctx context.Context, now time.Time) (int64, error) {
@@ -291,11 +339,18 @@ func (s *service) SweepStalePartialMessages(ctx context.Context, now time.Time) 
 //
 //   - event content that fails structural verification (zero chunk count, zero
 //     chunk index, empty data or message id);
-//   - a chunk index at or beyond the chunk count the message declared.
+//   - a chunk index at or beyond the chunk count the message declared, whether
+//     the index arrived after the count or before it.
 //
 // Both are things only the sender can cause. Content that will not parse is
 // deliberately NOT in the set, because the event class has to be reconstructed
 // on this side and a parse failure is as likely to be ours.
+//
+// The user banned is the one that sent the offending chunk, which for the
+// out-of-range trigger is read back from storage rather than taken from the
+// event being processed. A message id is chosen by its sender and nothing binds
+// one to a single account, so blaming whoever declared the count would let one
+// peer get another banned by planting a stray index under its message id.
 //
 // Previously nothing could reach this at all: the verification branch returned
 // a non-nil error alongside its ban verdict, and the caller checked the error

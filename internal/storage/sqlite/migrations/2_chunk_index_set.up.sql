@@ -13,6 +13,12 @@
 -- which lets a chunk that overtakes it be recorded rather than rejected.
 -- first_seen_at (unix seconds) exists so partial messages can be swept.
 --
+-- sender is recorded per chunk, not per message, because a message id is
+-- chosen by the sender and nothing binds one to a single account. An index
+-- that turns out to be out of range can only be judged once the count is
+-- declared, which may be a later event from a different account, so the row
+-- has to remember who actually sent it or the wrong peer gets blamed.
+--
 -- The old table only ever held in-flight reassembly tracking, so it is
 -- replaced rather than converted: anything in it is a message that was still
 -- arriving, and those resolve by being re-sent or swept.
@@ -28,6 +34,7 @@ CREATE TABLE chunked_messages (
 CREATE TABLE chunked_message_chunks (
     message_id               VARCHAR(150)  NOT NULL,
     chunk_index              INTEGER       NOT NULL,
+    sender                   VARCHAR(255)  NOT NULL,
     PRIMARY KEY (message_id, chunk_index)
 );
 
