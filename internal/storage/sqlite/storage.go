@@ -16,7 +16,11 @@ import (
 	"go.uber.org/zap"
 )
 
-const dbName = "cheque_handler"
+// dbName names this database when migrations are logged. It is passed to
+// golang-migrate purely as an identifier — the migration bookkeeping lives in
+// the driver's own table, whose name is independent of it — so correcting it
+// from the deleted cheque subsystem's name changes no stored state.
+const dbName = "app_service"
 
 //go:embed migrations/*.sql
 var embedMigrations embed.FS

@@ -1,6 +1,9 @@
 # Travel Token Matrix App Service
 
-The **Travel Token Matrix App Service** is an extension component of the Travel Token Messenger network. It runs alongside the Matrix homeserver (`camino-conduit`) to process, audit, and validate message transfers, focusing on fee compliance (Network Fees) and bot behavior.
+The **Travel Token Matrix App Service** is an extension component of the Travel Token Messenger network. It runs alongside the Matrix homeserver (`camino-conduit`) and observes message traffic: it checks that events are structurally well-formed and tracks multi-chunk messages, so that a bot which breaks the wire protocol can be identified.
+
+> [!IMPORTANT]
+> **This component provides no cryptographic assurance.** It does not verify signatures. See [Signature verification](#2-structural-verification-not-signature-verification) below for what it actually checks and where real verification happens.
 
 ---
 
@@ -18,10 +21,9 @@ The **Travel Token Matrix App Service** is an extension component of the Travel 
            ┌──────────────────────────────────┐
            │ Travel Token Matrix App Service  │
            │                                  │
-           │  1. Verifies signed message sigs │
-           │  2. Validates off-chain cheques   │
-           │  3. Tracks message chunks        │
-           │  4. Enforces bot compliance     │
+           │  1. Checks events are well-formed│
+           │  2. Tracks multi-chunk messages  │
+           │  3. Flags protocol violations    │
            └──────────────────┬───────────────┘
                               │
                       If check fails
@@ -36,27 +38,36 @@ The **Travel Token Matrix App Service** is an extension component of the Travel 
 1. **Event Capture**:
    - The App Service is registered automatically by `camino-conduit` at startup with access to the global namespace (`.*`).
    - It captures `matrix.EventTypeSignedMessage` and `matrix.EventTypeMessageChunk` events from all rooms.
-2. **Signature Verification**:
-   - For every transaction message, the App Service calls `eventContent.Verify()` to validate the sender's signature.
-3. **Cheque Validation**:
-   - Every transaction payload carries an off-chain cumulative cheque for the Network Fee.
-   - The App Service validates these cheques using its internal `chequeHandler.VerifyAndStoreCheque`. If a cheque is invalid, expired, or carries an incorrect amount, the bot sender is flagged.
-4. **Chunk Tracking**:
-   - Large payloads (such as extensive search results) are split and sent in chunks (`MessageChunk`). The App Service tracks chunk counts to prevent spam or misreporting.
+2. **Structural verification (not signature verification)**:
+   - For every captured event, the App Service calls `eventContent.Verify()`.
+   - `Verify()` checks **well-formedness only**: that the declared chunk count is non-zero, that a chunk index is non-zero, and that the message id and data are non-empty. It **does not read the `Signature` field and performs no `ecrecover`**.
+   - Signatures are verified by the bots at the ends of the conversation, which have the sender's account and the key material to do it. This component deliberately does not duplicate that: it sees the same bytes but adds no independent trust, and duplicating the crypto here would suggest an assurance that is not being provided.
+3. **Chunk tracking**:
+   - Large payloads (such as extensive search results) are split across a signed message plus a number of `MessageChunk` events. The App Service records **which chunk indices** have arrived for each message, so it can tell when a message is complete and when a sender sent an index it never declared.
+   - Indices are tracked as a set rather than counted, because Matrix redelivers events: counting arrivals cannot distinguish a redelivered chunk from a new one.
+   - Incomplete messages are swept after a fixed time-to-live, so a peer that starts messages it never finishes cannot grow the tracking table without bound.
 
 ---
 
 ## Current Enforcement Status
 
 > [!NOTE]
-> **Not Enforced Yet**: While the App Service processes and flags invalid cheques/signatures for user banning, the actual banning execution is currently a no-op stub:
-> ```go
-> // TODO @evlekht implement (next ticket) // persist with db, make it durable? not just call it from event receiver?
-> func (s *service) banUser(_ context.Context, _ id.UserID) error {
->     return nil
-> }
-> ```
-> Bots sending invalid cheques or missing signatures will generate warnings in the logs, but are not actively muted or blocked on the network at this stage.
+> **No cryptographic assurance.** This component does not verify signatures and holds no key material. Nothing it reports should be read as evidence that a message was genuinely sent by the account it names.
+
+> [!NOTE]
+> **Not enforced yet.** A sender that breaks the protocol is flagged, but the banning action itself is a no-op stub, so violations produce log entries and nothing more.
+
+A sender is flagged for exactly two things, both of which only the sender can cause:
+
+- event content that fails structural verification (zero chunk count, zero chunk index, empty message id or data);
+- a chunk index at or beyond the chunk count the message declared.
+
+Deliberately **not** flagged:
+
+- **Redelivered chunks.** A chunk arriving twice is the network's doing. It is recorded once and otherwise ignored.
+- **Content that fails to parse.** The Matrix event class is not transported and has to be reconstructed on this side, so a parse failure is at least as likely to be a fault here as at the sender. Such an event is dropped with a warning and nobody is blamed.
+
+Failures of *this component* — storage errors, for instance — are reported to the homeserver as a failed transaction so that it redelivers. A misbehaving peer is never answered that way: a homeserver retries a failed transaction indefinitely and holds the appservice's event stream while it does, so failing the transaction over one peer's bad event would stall every other sender behind it.
 
 ---
 
