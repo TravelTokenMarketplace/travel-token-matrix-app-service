@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/TravelTokenMarketplace/travel-token-matrix-app-service/config"
 	"github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/service"
@@ -65,6 +66,30 @@ func (a *App) Run(ctx context.Context) error {
 			return err
 		}
 		return nil
+	})
+
+	// The chunk-tracking table is written by remote peers: every multi-chunk
+	// message a peer starts adds rows, and only a message that actually
+	// completes removes them. A peer that starts messages it never finishes —
+	// by malice or by dropping off the network mid-message — would otherwise
+	// grow that table without bound.
+	a.safeGo(g, func() error {
+		ticker := time.NewTicker(service.PartialMessageSweepInterval)
+		defer ticker.Stop()
+		a.logger.Infof("Sweeping incomplete messages older than %s every %s.",
+			service.PartialMessageTTL, service.PartialMessageSweepInterval)
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case now := <-ticker.C:
+				if _, err := a.service.SweepStalePartialMessages(ctx, now); err != nil {
+					// A failed sweep is not worth taking the process down for;
+					// the next tick tries again.
+					a.logger.Errorf("Failed to sweep incomplete messages: %v", err)
+				}
+			}
+		}
 	})
 
 	// stop

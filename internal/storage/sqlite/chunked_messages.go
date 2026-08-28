@@ -8,51 +8,78 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TravelTokenMarketplace/travel-token-matrix-app-service/internal/service"
 	"github.com/TravelTokenMarketplace/travel-token-messenger-bot/v13/pkg/database/sqlite"
 	"github.com/jmoiron/sqlx"
 )
 
-const chunkedMessagesTableName = "chunked_messages"
+const (
+	chunkedMessagesTableName      = "chunked_messages"
+	chunkedMessageChunksTableName = "chunked_message_chunks"
+)
 
 var _ service.MessageChunksStorage = (*storage)(nil)
 
-type chunkedMessage struct {
-	MessageID           string `db:"message_id"`
-	StoredChunksCount   uint32 `db:"stored_chunks_count"`
-	ExpectedChunksCount uint32 `db:"expected_chunks_count"`
+// outOfRangeChunk is one recorded index that the declared chunk count says
+// cannot belong to the message, and the account that sent it.
+type outOfRangeChunk struct {
+	ChunkIndex uint32 `db:"chunk_index"`
+	Sender     string `db:"sender"`
 }
 
-func (s *storage) GetChunksCount(ctx context.Context, session service.Session, messageID string) (uint32, uint32, error) {
+func (s *storage) AddChunkIndex(
+	ctx context.Context,
+	session service.Session,
+	messageID string,
+	chunkIndex uint32,
+	sender string,
+	firstSeenAt time.Time,
+) (bool, error) {
 	tx, err := sqlite.GetSQLXTx(session)
 	if err != nil {
 		s.base.Logger.Error(err)
-		return 0, 0, err
+		return false, err
 	}
 
-	chunkedMessage := &chunkedMessage{}
-	if err := tx.StmtxContext(ctx, s.getChunksCount).GetContext(ctx, chunkedMessage, messageID); err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			s.base.Logger.Error(err)
-		}
-		return 0, 0, upgradeError(err)
+	// A chunk can arrive before the signed message that declares how many
+	// chunks there are, so the tracking record is created by whichever chunk
+	// gets here first and the count is filled in later.
+	if _, err := tx.StmtxContext(ctx, s.insertChunkedMessage).ExecContext(ctx, messageID, firstSeenAt.Unix()); err != nil {
+		s.base.Logger.Error(err)
+		return false, upgradeError(err)
 	}
-	return chunkedMessage.StoredChunksCount, chunkedMessage.ExpectedChunksCount, nil
+
+	result, err := tx.StmtxContext(ctx, s.insertChunkIndex).ExecContext(ctx, messageID, chunkIndex, sender)
+	if err != nil {
+		s.base.Logger.Error(err)
+		return false, upgradeError(err)
+	}
+
+	// The insert is OR IGNORE, so zero rows affected is precisely "this index
+	// had already arrived" — the redelivery case, reported rather than counted.
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		s.base.Logger.Error(err)
+		return false, upgradeError(err)
+	}
+	return rowsAffected == 1, nil
 }
 
-func (s *storage) AddFirstChunk(ctx context.Context, session service.Session, messageID string, expectedChunksCount, storedChunksCount uint32) error {
+func (s *storage) SetExpectedChunksCount(
+	ctx context.Context,
+	session service.Session,
+	messageID string,
+	expectedChunksCount uint32,
+) error {
 	tx, err := sqlite.GetSQLXTx(session)
 	if err != nil {
 		s.base.Logger.Error(err)
 		return err
 	}
 
-	result, err := tx.NamedStmtContext(ctx, s.upsertFirstChunk).ExecContext(ctx, chunkedMessage{
-		MessageID:           messageID,
-		StoredChunksCount:   storedChunksCount,
-		ExpectedChunksCount: expectedChunksCount,
-	})
+	result, err := tx.StmtxContext(ctx, s.setExpectedChunksCount).ExecContext(ctx, expectedChunksCount, messageID)
 	if err != nil {
 		s.base.Logger.Error(err)
 		return upgradeError(err)
@@ -61,31 +88,85 @@ func (s *storage) AddFirstChunk(ctx context.Context, session service.Session, me
 		s.base.Logger.Error(err)
 		return upgradeError(err)
 	} else if rowsAffected != 1 {
-		return fmt.Errorf("error while adding chunked message: expected to affect 1 row, but affected %d", rowsAffected)
+		return fmt.Errorf("error while setting expected chunks count: expected to affect 1 row, but affected %d", rowsAffected)
 	}
 	return nil
 }
 
-func (s *storage) UpdateChunksCount(ctx context.Context, session service.Session, messageID string, storedChunksCount uint32) error {
+func (s *storage) GetExpectedChunksCount(ctx context.Context, session service.Session, messageID string) (uint32, error) {
+	tx, err := sqlite.GetSQLXTx(session)
+	if err != nil {
+		s.base.Logger.Error(err)
+		return 0, err
+	}
+
+	var expectedChunksCount uint32
+	if err := tx.StmtxContext(ctx, s.getExpectedChunksCount).GetContext(ctx, &expectedChunksCount, messageID); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			s.base.Logger.Error(err)
+		}
+		return 0, upgradeError(err)
+	}
+	return expectedChunksCount, nil
+}
+
+func (s *storage) CountChunkIndicesBelow(
+	ctx context.Context,
+	session service.Session,
+	messageID string,
+	limit uint32,
+) (uint32, error) {
+	tx, err := sqlite.GetSQLXTx(session)
+	if err != nil {
+		s.base.Logger.Error(err)
+		return 0, err
+	}
+
+	var count uint32
+	if err := tx.StmtxContext(ctx, s.countChunkIndicesBelow).GetContext(ctx, &count, messageID, limit); err != nil {
+		s.base.Logger.Error(err)
+		return 0, upgradeError(err)
+	}
+	return count, nil
+}
+
+func (s *storage) FindChunkIndexAtOrAbove(
+	ctx context.Context,
+	session service.Session,
+	messageID string,
+	limit uint32,
+) (uint32, string, error) {
+	tx, err := sqlite.GetSQLXTx(session)
+	if err != nil {
+		s.base.Logger.Error(err)
+		return 0, "", err
+	}
+
+	outOfRange := &outOfRangeChunk{}
+	if err := tx.StmtxContext(ctx, s.findChunkIndexAtOrAbove).GetContext(ctx, outOfRange, messageID, limit); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			s.base.Logger.Error(err)
+		}
+		return 0, "", upgradeError(err)
+	}
+	return outOfRange.ChunkIndex, outOfRange.Sender, nil
+}
+
+func (s *storage) DeleteChunkIndicesAtOrAbove(
+	ctx context.Context,
+	session service.Session,
+	messageID string,
+	limit uint32,
+) error {
 	tx, err := sqlite.GetSQLXTx(session)
 	if err != nil {
 		s.base.Logger.Error(err)
 		return err
 	}
 
-	result, err := tx.NamedStmtContext(ctx, s.upsertFirstChunk).ExecContext(ctx, chunkedMessage{
-		MessageID:         messageID,
-		StoredChunksCount: storedChunksCount,
-	})
-	if err != nil {
+	if _, err := tx.StmtxContext(ctx, s.deleteChunkIndicesAtOrAbove).ExecContext(ctx, messageID, limit); err != nil {
 		s.base.Logger.Error(err)
 		return upgradeError(err)
-	}
-	if rowsAffected, err := result.RowsAffected(); err != nil {
-		s.base.Logger.Error(err)
-		return upgradeError(err)
-	} else if rowsAffected != 1 {
-		return fmt.Errorf("error while adding message chunk: expected to affect 1 row, but affected %d", rowsAffected)
 	}
 	return nil
 }
@@ -95,6 +176,11 @@ func (s *storage) DeleteChunkedMessage(ctx context.Context, session service.Sess
 	if err != nil {
 		s.base.Logger.Error(err)
 		return err
+	}
+
+	if _, err := tx.StmtxContext(ctx, s.deleteChunkIndices).ExecContext(ctx, messageID); err != nil {
+		s.base.Logger.Error(err)
+		return upgradeError(err)
 	}
 
 	result, err := tx.StmtxContext(ctx, s.deleteChunkedMessage).ExecContext(ctx, messageID)
@@ -111,73 +197,130 @@ func (s *storage) DeleteChunkedMessage(ctx context.Context, session service.Sess
 	return nil
 }
 
+func (s *storage) DeleteStalePartialMessages(ctx context.Context, session service.Session, cutoff time.Time) (int64, error) {
+	tx, err := sqlite.GetSQLXTx(session)
+	if err != nil {
+		s.base.Logger.Error(err)
+		return 0, err
+	}
+
+	if _, err := tx.StmtxContext(ctx, s.deleteStaleChunkIndices).ExecContext(ctx, cutoff.Unix()); err != nil {
+		s.base.Logger.Error(err)
+		return 0, upgradeError(err)
+	}
+
+	result, err := tx.StmtxContext(ctx, s.deleteStaleChunkedMessages).ExecContext(ctx, cutoff.Unix())
+	if err != nil {
+		s.base.Logger.Error(err)
+		return 0, upgradeError(err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		s.base.Logger.Error(err)
+		return 0, upgradeError(err)
+	}
+	return rowsAffected, nil
+}
+
 type chunkedMessagesStatements struct {
-	getChunksCount, deleteChunkedMessage *sqlx.Stmt
-	upsertFirstChunk                     *sqlx.NamedStmt
-	upsertChunksCount                    *sqlx.NamedStmt
+	insertChunkedMessage        *sqlx.Stmt
+	setExpectedChunksCount      *sqlx.Stmt
+	getExpectedChunksCount      *sqlx.Stmt
+	insertChunkIndex            *sqlx.Stmt
+	countChunkIndicesBelow      *sqlx.Stmt
+	findChunkIndexAtOrAbove     *sqlx.Stmt
+	deleteChunkIndicesAtOrAbove *sqlx.Stmt
+	deleteChunkedMessage        *sqlx.Stmt
+	deleteChunkIndices          *sqlx.Stmt
+	deleteStaleChunkedMessages  *sqlx.Stmt
+	deleteStaleChunkIndices     *sqlx.Stmt
 }
 
 func (s *storage) prepareChunkedMessagesStmts(ctx context.Context) error {
-	getChunksCount, err := s.base.DB.PreparexContext(ctx, fmt.Sprintf(`
-		SELECT stored_chunks_count, expected_chunks_count FROM %s
-		WHERE message_id = ?
-	`, chunkedMessagesTableName))
-	if err != nil {
-		s.base.Logger.Error(err)
-		return err
+	stmts := []struct {
+		query string
+		into  **sqlx.Stmt
+	}{
+		{
+			// OR IGNORE: whichever chunk arrives first creates the record and
+			// later ones leave it (and its first_seen_at) alone.
+			query: fmt.Sprintf(`
+				INSERT OR IGNORE INTO %s (message_id, expected_chunks_count, first_seen_at)
+				VALUES (?, 0, ?)
+			`, chunkedMessagesTableName),
+			into: &s.insertChunkedMessage,
+		},
+		{
+			query: fmt.Sprintf(`
+				UPDATE %s SET expected_chunks_count = ? WHERE message_id = ?
+			`, chunkedMessagesTableName),
+			into: &s.setExpectedChunksCount,
+		},
+		{
+			query: fmt.Sprintf(`
+				SELECT expected_chunks_count FROM %s WHERE message_id = ?
+			`, chunkedMessagesTableName),
+			into: &s.getExpectedChunksCount,
+		},
+		{
+			// OR IGNORE against the (message_id, chunk_index) primary key is
+			// what makes a redelivered chunk a no-op instead of a count.
+			query: fmt.Sprintf(`
+				INSERT OR IGNORE INTO %s (message_id, chunk_index, sender) VALUES (?, ?, ?)
+			`, chunkedMessageChunksTableName),
+			into: &s.insertChunkIndex,
+		},
+		{
+			query: fmt.Sprintf(`
+				SELECT COUNT(*) FROM %s WHERE message_id = ? AND chunk_index < ?
+			`, chunkedMessageChunksTableName),
+			into: &s.countChunkIndicesBelow,
+		},
+		{
+			// Lowest first, so the reported index is stable rather than
+			// whichever row the engine happened to reach first.
+			query: fmt.Sprintf(`
+				SELECT chunk_index, sender FROM %s
+				WHERE message_id = ? AND chunk_index >= ?
+				ORDER BY chunk_index LIMIT 1
+			`, chunkedMessageChunksTableName),
+			into: &s.findChunkIndexAtOrAbove,
+		},
+		{
+			query: fmt.Sprintf(`
+				DELETE FROM %s WHERE message_id = ? AND chunk_index >= ?
+			`, chunkedMessageChunksTableName),
+			into: &s.deleteChunkIndicesAtOrAbove,
+		},
+		{
+			query: fmt.Sprintf(`DELETE FROM %s WHERE message_id = ?`, chunkedMessagesTableName),
+			into:  &s.deleteChunkedMessage,
+		},
+		{
+			query: fmt.Sprintf(`DELETE FROM %s WHERE message_id = ?`, chunkedMessageChunksTableName),
+			into:  &s.deleteChunkIndices,
+		},
+		{
+			query: fmt.Sprintf(`DELETE FROM %s WHERE first_seen_at < ?`, chunkedMessagesTableName),
+			into:  &s.deleteStaleChunkedMessages,
+		},
+		{
+			query: fmt.Sprintf(`
+				DELETE FROM %s WHERE message_id IN (
+					SELECT message_id FROM %s WHERE first_seen_at < ?
+				)
+			`, chunkedMessageChunksTableName, chunkedMessagesTableName),
+			into: &s.deleteStaleChunkIndices,
+		},
 	}
-	s.getChunksCount = getChunksCount
 
-	upsertFirstChunk, err := s.base.DB.PrepareNamedContext(ctx, fmt.Sprintf(`
-		INSERT INTO %s (
-			message_id,
-			stored_chunks_count,
-			expected_chunks_count
-		) VALUES (
-			:message_id,
-			:stored_chunks_count,
-			:expected_chunks_count
-		)
-		ON CONFLICT(message_id)
-		DO UPDATE SET
-			stored_chunks_count = excluded.stored_chunks_count,
-			expected_chunks_count = excluded.expected_chunks_count
-	`, chunkedMessagesTableName))
-	if err != nil {
-		s.base.Logger.Error(err)
-		return err
+	for _, stmt := range stmts {
+		prepared, err := s.base.DB.PreparexContext(ctx, stmt.query)
+		if err != nil {
+			s.base.Logger.Error(err)
+			return err
+		}
+		*stmt.into = prepared
 	}
-	s.upsertFirstChunk = upsertFirstChunk
-
-	upsertChunksCount, err := s.base.DB.PrepareNamedContext(ctx, fmt.Sprintf(`
-		INSERT INTO %s (
-			message_id,
-			stored_chunks_count,
-			expected_chunks_count
-		) VALUES (
-			:message_id,
-			:stored_chunks_count,
-			0
-		)
-		ON CONFLICT(message_id)
-		DO UPDATE SET
-			stored_chunks_count = excluded.stored_chunks_count
-	`, chunkedMessagesTableName))
-	if err != nil {
-		s.base.Logger.Error(err)
-		return err
-	}
-	s.upsertChunksCount = upsertChunksCount
-
-	deleteChunkedMessage, err := s.base.DB.PreparexContext(ctx, fmt.Sprintf(`
-		DELETE FROM %s
-		WHERE message_id = ?
-	`, chunkedMessagesTableName))
-	if err != nil {
-		s.base.Logger.Error(err)
-		return err
-	}
-	s.deleteChunkedMessage = deleteChunkedMessage
-
 	return nil
 }
